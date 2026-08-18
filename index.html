@@ -63,7 +63,7 @@
   </div>
 
   <!-- Mode Status Indicator (Clickable to Toggle Modes) -->
-  <div id="mode-indicator" class="mode-indicator">Mode: Live GPS</div>
+  <div id="mode-indicator" class="mode-indicator">Mode: Live GPS<span class="gps-recalibrate" title="Recalibrate GPS">&#x21bb;</span></div>
 
   <!-- Interior View Badge -->
   <div id="interior-badge" class="interior-badge">
@@ -82,6 +82,13 @@
   <div id="oob-banner" class="oob-banner">
     <span>You are outside the mapped campus area. Position clamped.</span>
     <button id="oob-dismiss" type="button">&times;</button>
+  </div>
+
+  <!-- GPS Retry / Permission Denied Banner -->
+  <div id="gps-retry-banner" class="gps-retry-banner">
+    <span id="gps-retry-text">Location access denied — enable GPS in your browser settings</span>
+    <button id="gps-retry-btn" type="button">Try Again</button>
+    <button id="gps-retry-dismiss" type="button">&times;</button>
   </div>
 
   <!-- Left Joystick (Movement) for Manual Mode -->
@@ -151,11 +158,11 @@
       </button>
 
       <div id="legends-popup" class="legends-popup">
-        <div class="legend-item"><div class="legend-color-box" style="background: #e11d48;"></div> Red Marker (Block A, D, LDC)</div>
-        <div class="legend-item"><div class="legend-color-box" style="background: #1e3a8a;"></div> Navy Marker (Block B)</div>
-        <div class="legend-item"><div class="legend-color-box" style="background: #2563eb;"></div> Blue Marker (Cafes)</div>
-        <div class="legend-item"><div class="legend-color-box" style="background: #e11d48; border-radius: 50%;"></div> User GPS Position</div>
-        <div class="legend-item"><div class="legend-color-box" style="background: #38bdf8; height: 3px; border-radius: 1px;"></div> Animated Route Line</div>
+        <div class="legend-item"><div class="legend-color-box" style="background: #d1d5db; border: 1px solid #9ca3af;"></div> Campus Building</div>
+        <div class="legend-item"><div class="legend-color-box" style="background: #f59e0b;"></div> Selected Destination</div>
+        <div class="legend-item"><div class="legend-color-box" style="background: #0ea5e9; border-radius: 50%;"></div> Your Location</div>
+        <div class="legend-item"><div class="legend-color-box" style="background: #06b6d4; height: 3px; border-radius: 1px;"></div> Walking Route</div>
+        <div class="legend-item"><div class="legend-color-box" style="background: #f59e0b; height: 3px; border-radius: 1px;"></div> Direction to Route</div>
       </div>
     </div>
   </div>

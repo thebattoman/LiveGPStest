@@ -7,6 +7,7 @@
     const DEBUG_MODE = new URLSearchParams(location.search).has('debug');
 
     let currentUserCoords = [...START_COORDINATE];
+    let gpsInitialized = false; // waits for first real GPS fix before showing marker/camera
 
     const map = new maplibregl.Map({
       container: 'map',
@@ -45,6 +46,10 @@
     const legendsToggleBtn = document.getElementById('legends-toggle-btn');
     const legendsPopup = document.getElementById('legends-popup');
     const outOfBoundsBanner = document.getElementById('oob-banner');
+    const gpsRetryBanner = document.getElementById('gps-retry-banner');
+    const gpsRetryText = document.getElementById('gps-retry-text');
+    const gpsRetryBtn = document.getElementById('gps-retry-btn');
+    const gpsRetryDismiss = document.getElementById('gps-retry-dismiss');
     const interiorBadge = document.getElementById('interior-badge');
     const interiorSuggest = document.getElementById('interior-suggest');
     const interiorSuggestName = document.getElementById('interior-suggest-name');
@@ -138,8 +143,12 @@
       const targetHeight = BUILDING_TARGET_HEIGHTS[blockKey] ?? 0;
 
       BUILDINGS_3D_GEOJSON.features.forEach(f => {
-        if (f.properties.blockKey !== blockKey) f.properties.height = 0;
+        if (f.properties.blockKey !== blockKey) {
+          f.properties.height = 0;
+          f.properties.color = '#d1d5db';
+        }
       });
+      feature.properties.color = '#f59e0b';
 
       map.setLayoutProperty('buildings-3d-layer', 'visibility', 'visible');
       map.setPaintProperty('buildings-3d-layer', 'fill-extrusion-opacity', 0.85);
@@ -499,7 +508,6 @@
       if (hasCompassHeading) {
         userHeading = heading;
         updateVisionConeOrientation();
-        followCamera();
       }
       updateHeadingAvailability();
     }
@@ -526,10 +534,12 @@
     let wasOutOfBounds = false;
     let oobDismissed = false;
 
-    const GPS_SMOOTH_ALPHA_MIN = 0.12; // aggressive smoothing for idle GPS jitter
-    const GPS_SMOOTH_ALPHA_MAX = 0.65;  // responsive while walking
+    const GPS_SMOOTH_ALPHA_MIN = 0.12; // responsive to small real movements
+    const GPS_SMOOTH_ALPHA_MAX = 0.18;  // dampens GPS spikes aggressively
+    const GPS_SPIKE_THRESHOLD = 0.00015; // ~15m — cap alpha if displacement exceeds this
+    const GPS_SPIKE_ALPHA = 0.05;        // heavy suppression for extreme multipath jumps
     const GPS_DEADBAND = 0.0000135;     // ~1.5m in degrees (matches real phone accuracy)
-    const GPS_LERP_PER_FRAME = 0.14;    // interpolation factor per frame toward GPS target
+    const GPS_LERP_PER_FRAME = 0.08;    // interpolation factor per frame toward GPS target
     const ON_NETWORK_THRESHOLD = GPS_DEADBAND * 4; // from path -> hide helper line
 
     let targetCoords = [...START_COORDINATE];  // GPS-filtered destination
@@ -574,6 +584,25 @@
       const clampedLng = Math.max(BOUNDING_BOX[0][0], Math.min(BOUNDING_BOX[1][0], lng));
       const clampedLat = Math.max(BOUNDING_BOX[0][1], Math.min(BOUNDING_BOX[1][1], lat));
 
+      // First fix: snap both coords to the real position, show marker, ease map.
+      if (!gpsInitialized) {
+        gpsInitialized = true;
+        currentUserCoords[0] = clampedLng;
+        currentUserCoords[1] = clampedLat;
+        targetCoords[0] = clampedLng;
+        targetCoords[1] = clampedLat;
+        userMarker.setLngLat(currentUserCoords);
+        userContainer.style.display = '';
+        updateVisionConeOrientation();
+        map.easeTo({ center: currentUserCoords, zoom: INITIAL_ZOOM, pitch: DEFAULT_PITCH, bearing: DEFAULT_BEARING, duration: 1200 });
+        updateStraightLine();
+        updateNearestEntryMarker();
+        updateActiveRouteLine();
+        updateInteriorView();
+        updateHeadingAvailability();
+        return;
+      }
+
       // EMA-smooth toward the raw fix to filter GPS noise, updating the *target*
       // position. The RAF loop interpolates currentUserCoords toward this target.
       const dx = clampedLng - targetCoords[0];
@@ -581,8 +610,13 @@
       const dist = Math.hypot(dx, dy);
 
       if (dist > GPS_DEADBAND) {
-        const alpha = Math.min(GPS_SMOOTH_ALPHA_MAX, GPS_SMOOTH_ALPHA_MIN +
-          (dist / GPS_DEADBAND) * 0.35);
+        let alpha;
+        if (dist > GPS_SPIKE_THRESHOLD) {
+          alpha = GPS_SPIKE_ALPHA;
+        } else {
+          alpha = Math.min(GPS_SMOOTH_ALPHA_MAX, GPS_SMOOTH_ALPHA_MIN +
+            (dist / GPS_DEADBAND) * 0.10);
+        }
         targetCoords[0] += dx * alpha;
         targetCoords[1] += dy * alpha;
         lastGpsFixTime = performance.now();
@@ -601,6 +635,67 @@
       outOfBoundsBanner.classList.remove('show');
     });
 
+    // --- GPS RETRY / RECALIBRATE ---
+    let gpsRetryDismissed = false;
+
+    function showGpsRetryBanner(message) {
+      gpsRetryText.textContent = message;
+      gpsRetryBanner.classList.add('show');
+      modeIndicator.classList.add('gps-unavailable');
+      modeIndicator.childNodes[0].textContent = 'GPS Unavailable — Tap to Retry';
+    }
+
+    function hideGpsRetryBanner() {
+      gpsRetryBanner.classList.remove('show');
+      modeIndicator.classList.remove('gps-unavailable');
+      if (controlMode === 'gps') {
+        modeIndicator.childNodes[0].textContent = 'Mode: Live GPS';
+      }
+    }
+
+    gpsRetryBtn.addEventListener('click', () => {
+      hideGpsRetryBanner();
+      gpsRetryDismissed = false;
+      recalibrateGPS();
+    });
+
+    gpsRetryDismiss.addEventListener('click', () => {
+      gpsRetryDismissed = true;
+      gpsRetryBanner.classList.remove('show');
+    });
+
+    function recalibrateGPS() {
+      gpsInitialized = false;
+      userContainer.style.display = 'none';
+      if (typeof watchId !== 'undefined' && watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            applyGpsFix(position.coords.longitude, position.coords.latitude, position.coords.heading);
+          },
+          (error) => {
+            handleGpsError(error);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+        startGPSWatch();
+      }
+    }
+
+    function handleGpsError(error) {
+      if (gpsRetryDismissed) return;
+      if (error.code === 1) { // PERMISSION_DENIED
+        showGpsRetryBanner('Location access denied — enable GPS in your browser settings');
+      } else if (error.code === 2) { // POSITION_UNAVAILABLE
+        showGpsRetryBanner('GPS signal unavailable — try moving to an open area');
+      } else if (error.code === 3) { // TIMEOUT
+        showGpsRetryBanner('GPS request timed out — try again');
+      }
+    }
+
+    // --- INITIAL GPS ACQUISITION ---
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -608,6 +703,7 @@
         },
         (error) => {
           console.warn("Initial GPS position acquisition failed.", error);
+          handleGpsError(error);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -636,7 +732,25 @@
       }
     }
 
-    modeIndicator.addEventListener('click', toggleControlMode);
+    modeIndicator.addEventListener('click', (e) => {
+      const recalibrateIcon = modeIndicator.querySelector('.gps-recalibrate');
+      if (recalibrateIcon && recalibrateIcon.contains(e.target)) {
+        // Tap on 🔄 icon → recalibrate GPS
+        gpsRetryDismissed = false;
+        hideGpsRetryBanner();
+        recalibrateGPS();
+        return;
+      }
+      if (modeIndicator.classList.contains('gps-unavailable')) {
+        // GPS unavailable → retry
+        gpsRetryDismissed = false;
+        hideGpsRetryBanner();
+        recalibrateGPS();
+        return;
+      }
+      // Normal mode toggle
+      toggleControlMode();
+    });
 
     // --- DUAL JOYSTICK CONTROL SYSTEM ---
     const JOYSTICK_RADIUS = 50;
@@ -847,7 +961,7 @@
           'line-cap': 'round'
         },
         paint: {
-          'line-color': '#1e3a8a',
+          'line-color': '#1e293b',
           'line-width': 6,
           'line-opacity': 0.8
         }
@@ -862,7 +976,7 @@
           'line-cap': 'round'
         },
         paint: {
-          'line-color': '#38bdf8',
+          'line-color': '#06b6d4',
           'line-width': 4,
           'line-dasharray': [0, 2, 2]
         }
@@ -909,7 +1023,7 @@
           'text-allow-overlap': true
         },
         paint: {
-          'text-color': '#1e3a8a',
+          'text-color': '#334155',
           'text-halo-color': '#ffffff',
           'text-halo-width': 2.5
         }
@@ -934,7 +1048,7 @@
         source: 'straight-line-source',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
-          'line-color': '#e11d48',
+          'line-color': '#f59e0b',
           'line-width': 2,
           'line-dasharray': [3, 3],
           'line-opacity': 0.5
@@ -1008,6 +1122,7 @@
     // FPV camera follows the user marker orientation (Pitch = 60), except during the
     // one-shot cinematic dive on building selection and while in interior view.
     function followCamera() {
+      if (!gpsInitialized) return;
       if (isInteriorView) {
         map.jumpTo({ center: currentUserCoords, pitch: INTERIOR_PITCH, bearing: 0 });
         return;
@@ -1280,7 +1395,7 @@
     const blockMarkers = {};
     Object.keys(BLOCKS).forEach(key => {
       const block = BLOCKS[key];
-      const mainMarker = new maplibregl.Marker({ color: block.color })
+      const mainMarker = new maplibregl.Marker({ color: '#f59e0b' })
         .setLngLat(block.coords);
 
       const markerEl = mainMarker.getElement();
@@ -1565,8 +1680,8 @@
     visionConeSvg.innerHTML = `
       <defs>
         <linearGradient id="coneGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-          <stop offset="0%" stop-color="#2563eb" stop-opacity="0.45"/>
-          <stop offset="100%" stop-color="#e11d48" stop-opacity="0.05"/>
+          <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.45"/>
+          <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.05"/>
         </linearGradient>
       </defs>
       <path d="M 30 30 L 12 3 A 30 30 0 0 1 48 3 Z" fill="url(#coneGrad)" />
@@ -1581,6 +1696,8 @@
     userContainer.appendChild(visionConeSvg);
     userContainer.appendChild(userPulse);
     userContainer.appendChild(userDot);
+
+    userContainer.style.display = 'none'; // hidden until first GPS fix
 
     const userMarker = new maplibregl.Marker({ element: userContainer })
       .setLngLat(currentUserCoords)
@@ -1605,6 +1722,7 @@
           },
           (error) => {
             console.warn("GPS watchPosition error or unavailable.", error);
+            handleGpsError(error);
           },
           { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
         );
@@ -1782,6 +1900,7 @@
         if (!DEBUG_MODE) return;
         e.preventDefault();
         currentUserCoords = [...START_COORDINATE];
+        targetCoords = [...currentUserCoords];
         userMarker.setLngLat(currentUserCoords);
         updateVisionConeOrientation();
         updateStraightLine();
@@ -1801,6 +1920,7 @@
       if (controlMode === 'manual' && DEBUG_MODE && TELEPORT_COORDINATES[key]) {
         e.preventDefault();
         currentUserCoords = [...TELEPORT_COORDINATES[key]];
+        targetCoords = [...currentUserCoords];
         userMarker.setLngLat(currentUserCoords);
         updateVisionConeOrientation();
         updateStraightLine();
@@ -1831,7 +1951,7 @@
       // --- GPS INTERPOLATION (runs every frame in GPS mode) ---
       // Lerps currentUserCoords toward the EMA-filtered targetCoords so the marker
       // and camera glide smoothly at 60 Hz between GPS fixes (1-5 Hz).
-      if (controlMode === 'gps') {
+      if (controlMode === 'gps' && gpsInitialized) {
         const dx = targetCoords[0] - currentUserCoords[0];
         const dy = targetCoords[1] - currentUserCoords[1];
         if (dx !== 0 || dy !== 0) {
