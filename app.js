@@ -36,6 +36,7 @@
     let introHoldCoords = null;      // position captured when the dive framing was held
 
     const modeIndicator = document.getElementById('mode-indicator');
+    const manualModeBtn = document.getElementById('manual-mode-btn');
     const joystickLeft = document.getElementById('joystick-left');
     const joystickThumbLeft = document.getElementById('joystick-thumb-left');
     const joystickRight = document.getElementById('joystick-right');
@@ -413,6 +414,17 @@
       hideInteriorSuggestion();
     });
 
+    document.getElementById('interior-entry-icon').addEventListener('click', () => {
+      if (!selectedLocationKey || !isFPVEnabled) return;
+      if (isInteriorView) {
+        exitInteriorView();
+      } else {
+        resetCameraFollow();
+        manualInteriorView = true;
+        enterInteriorView(selectedLocationKey);
+      }
+    });
+
     function enterInteriorView(blockKey) {
       if (!isFPVEnabled) return;
       if (isInteriorView && interiorBlockKey === blockKey) return;
@@ -476,16 +488,23 @@
 
     function updateInteriorView() {
       const dist = distanceToBuildingMeters(selectedLocationKey);
+      const interiorIcon = document.getElementById('interior-entry-icon');
+
+      // Show icon when within 12m of selected building OR already in interior view
+      if (selectedLocationKey && !isInteriorView && dist <= INTERIOR_TRIGGER_RADIUS_M) {
+        interiorIcon.classList.add('show');
+      } else if (isInteriorView) {
+        interiorIcon.classList.add('show');
+      } else {
+        interiorIcon.classList.remove('show');
+      }
+
       if (isInteriorView && !manualInteriorView &&
           dist <= INTERIOR_TRIGGER_RADIUS_M + INTERIOR_TRIGGER_HYSTERESIS_M) {
-        // Auto-entered interior stays until the user leaves radius + hysteresis.
         return;
       }
-      if (dist <= INTERIOR_TRIGGER_RADIUS_M) {
-        manualInteriorView = false;
-        enterInteriorView(selectedLocationKey);
-      } else if (isInteriorView && manualInteriorView &&
-                 dist <= SUGGEST_RADIUS_M + SUGGEST_HYSTERESIS_M) {
+      if (isInteriorView && manualInteriorView &&
+          dist <= SUGGEST_RADIUS_M + SUGGEST_HYSTERESIS_M) {
         // Interior entered via the popup toggle stays until the user exits or leaves the radius.
       } else if (isInteriorView) {
         exitInteriorView();
@@ -688,8 +707,6 @@
       if (gpsRetryDismissed) return;
       if (error.code === 1) { // PERMISSION_DENIED
         showGpsRetryBanner('Location access denied — enable GPS in your browser settings');
-      } else if (error.code === 2) { // POSITION_UNAVAILABLE
-        showGpsRetryBanner('GPS signal unavailable — try moving to an open area');
       } else if (error.code === 3) { // TIMEOUT
         showGpsRetryBanner('GPS request timed out — try again');
       }
@@ -720,12 +737,19 @@
         controlMode = 'manual';
         modeIndicator.textContent = 'Mode: Manual Controller (Joysticks / WASD)';
         modeIndicator.classList.add('manual');
+        manualModeBtn.classList.add('active');
         joystickLeft.classList.add('active');
         joystickRight.classList.add('active');
+        currentUserCoords = [...START_COORDINATE];
+        targetCoords = [...START_COORDINATE];
+        userMarker.setLngLat(currentUserCoords);
+        userContainer.style.display = '';
+        map.easeTo({ center: currentUserCoords, zoom: INITIAL_ZOOM, pitch: DEFAULT_PITCH, bearing: DEFAULT_BEARING, duration: 800 });
       } else {
         controlMode = 'gps';
         modeIndicator.textContent = 'Mode: Live GPS';
         modeIndicator.classList.remove('manual');
+        manualModeBtn.classList.remove('active');
         joystickLeft.classList.remove('active');
         joystickRight.classList.remove('active');
         initDeviceOrientation();
@@ -735,22 +759,20 @@
     modeIndicator.addEventListener('click', (e) => {
       const recalibrateIcon = modeIndicator.querySelector('.gps-recalibrate');
       if (recalibrateIcon && recalibrateIcon.contains(e.target)) {
-        // Tap on 🔄 icon → recalibrate GPS
         gpsRetryDismissed = false;
         hideGpsRetryBanner();
         recalibrateGPS();
         return;
       }
       if (modeIndicator.classList.contains('gps-unavailable')) {
-        // GPS unavailable → retry
         gpsRetryDismissed = false;
         hideGpsRetryBanner();
         recalibrateGPS();
         return;
       }
-      // Normal mode toggle
-      toggleControlMode();
     });
+
+    manualModeBtn.addEventListener('click', toggleControlMode);
 
     // --- DUAL JOYSTICK CONTROL SYSTEM ---
     const JOYSTICK_RADIUS = 50;
@@ -1125,6 +1147,14 @@
       if (!gpsInitialized) return;
       if (isInteriorView) {
         map.jumpTo({ center: currentUserCoords, pitch: INTERIOR_PITCH, bearing: 0 });
+        return;
+      }
+      if (controlMode === 'manual') {
+        if (isFPVEnabled) {
+          updateFPVCamera();
+        } else {
+          map.jumpTo({ center: currentUserCoords });
+        }
         return;
       }
       if (!isFPVEnabled) return;
