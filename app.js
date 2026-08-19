@@ -8,6 +8,7 @@
 
     let currentUserCoords = [...START_COORDINATE];
     let gpsInitialized = false; // waits for first real GPS fix before showing marker/camera
+    let gpsSignalLost = false;
 
     const map = new maplibregl.Map({
       container: 'map',
@@ -47,23 +48,11 @@
     const legendsToggleBtn = document.getElementById('legends-toggle-btn');
     const legendsPopup = document.getElementById('legends-popup');
     const outOfBoundsBanner = document.getElementById('oob-banner');
-    const gpsRetryBanner = document.getElementById('gps-retry-banner');
-    const gpsRetryText = document.getElementById('gps-retry-text');
-    const gpsRetryBtn = document.getElementById('gps-retry-btn');
-    const gpsRetryDismiss = document.getElementById('gps-retry-dismiss');
     const interiorBadge = document.getElementById('interior-badge');
-    const interiorSuggest = document.getElementById('interior-suggest');
-    const interiorSuggestName = document.getElementById('interior-suggest-name');
-    const interiorSuggestBtn = document.getElementById('interior-suggest-btn');
-    const interiorSuggestClose = document.getElementById('interior-suggest-close');
 
-    // Interior View Suggestion Popup State
-    const SUGGEST_RADIUS_M = 30;       // suggest when within this many meters of the footprint
-    const SUGGEST_HYSTERESIS_M = 5;    // must leave radius + this before a dismissed popup returns
-    const INTERIOR_TRIGGER_RADIUS_M = 12;      // auto-enter interior within this many meters (GPS-friendly)
+    const INTERIOR_TRIGGER_RADIUS_M = 12;      // enter interior within this many meters (GPS-friendly)
     const INTERIOR_TRIGGER_HYSTERESIS_M = 6;   // leave radius + this before auto-interior exits
-    let interiorSuggestionDismissed = false;
-    let manualInteriorView = false;    // interior entered via the suggestion popup toggle
+    let manualInteriorView = false;    // interior entered via the icon toggle
 
     let dashOffset = 0;
     let dashAnimationId = null;
@@ -354,66 +343,6 @@
       return best;
     }
 
-    function showInteriorSuggestion() {
-      const blockName = BLOCKS[selectedLocationKey] ? BLOCKS[selectedLocationKey].name : 'Building';
-      const textSpan = document.getElementById('interior-suggest-text');
-      if (textSpan.firstChild) {
-        textSpan.firstChild.textContent = isInteriorView
-          ? 'Interior view active for '
-          : 'Interior view available for ';
-      }
-      interiorSuggestName.textContent = blockName;
-      interiorSuggestBtn.textContent = isInteriorView ? 'Exit Interior' : 'View Interior';
-      interiorSuggest.classList.add('show');
-    }
-
-    function hideInteriorSuggestion() {
-      interiorSuggest.classList.remove('show');
-    }
-
-    function updateInteriorSuggestion() {
-      if (!selectedLocationKey || controlMode === 'manual' || !isFPVEnabled) {
-        hideInteriorSuggestion();
-        return;
-      }
-      if (!isInteriorView && !manualInteriorView) {
-        const distance = distanceToBuildingMeters(selectedLocationKey);
-        if (distance > SUGGEST_RADIUS_M + SUGGEST_HYSTERESIS_M) {
-          interiorSuggestionDismissed = false;
-        }
-        if (distance <= SUGGEST_RADIUS_M && !interiorSuggestionDismissed) {
-          showInteriorSuggestion();
-        } else {
-          hideInteriorSuggestion();
-        }
-      } else if (manualInteriorView) {
-        const distance = distanceToBuildingMeters(selectedLocationKey);
-        if (distance <= SUGGEST_RADIUS_M + SUGGEST_HYSTERESIS_M) {
-          showInteriorSuggestion();
-        } else {
-          hideInteriorSuggestion();
-        }
-      }
-    }
-
-    interiorSuggestBtn.addEventListener('click', () => {
-      hideInteriorSuggestion();
-      if (isInteriorView) {
-        exitInteriorView();
-        return;
-      }
-      if (!selectedLocationKey || !isFPVEnabled) return;
-      resetCameraFollow();
-      manualInteriorView = true;
-      enterInteriorView(selectedLocationKey);
-      showInteriorSuggestion();
-    });
-
-    interiorSuggestClose.addEventListener('click', () => {
-      interiorSuggestionDismissed = true;
-      hideInteriorSuggestion();
-    });
-
     document.getElementById('interior-entry-icon').addEventListener('click', () => {
       if (!selectedLocationKey || !isFPVEnabled) return;
       if (isInteriorView) {
@@ -430,8 +359,6 @@
       if (isInteriorView && interiorBlockKey === blockKey) return;
       isInteriorView = true;
       interiorBlockKey = blockKey;
-
-      hideInteriorSuggestion();
 
       const blockName = BLOCKS[blockKey] ? BLOCKS[blockKey].name : 'Building';
       document.getElementById('interior-badge-title').textContent = blockName + ' · Interior View';
@@ -504,12 +431,11 @@
         return;
       }
       if (isInteriorView && manualInteriorView &&
-          dist <= SUGGEST_RADIUS_M + SUGGEST_HYSTERESIS_M) {
-        // Interior entered via the popup toggle stays until the user exits or leaves the radius.
+          dist <= INTERIOR_TRIGGER_RADIUS_M + INTERIOR_TRIGGER_HYSTERESIS_M) {
+        // Manual interior stays within radius.
       } else if (isInteriorView) {
         exitInteriorView();
       }
-      updateInteriorSuggestion();
     }
 
     // --- DEVICE ORIENTATION COMPASS HEADING LISTENER ---
@@ -589,6 +515,10 @@
     }
 
     function applyGpsFix(lng, lat, heading) {
+      if (gpsSignalLost) {
+        gpsSignalLost = false;
+        userContainer.classList.remove('gps-lost');
+      }
       const outOfBounds = lng < BOUNDING_BOX[0][0] || lng > BOUNDING_BOX[1][0] ||
                           lat < BOUNDING_BOX[0][1] || lat > BOUNDING_BOX[1][1];
       updateOutOfBoundsState(outOfBounds);
@@ -655,34 +585,6 @@
     });
 
     // --- GPS RETRY / RECALIBRATE ---
-    let gpsRetryDismissed = false;
-
-    function showGpsRetryBanner(message) {
-      gpsRetryText.textContent = message;
-      gpsRetryBanner.classList.add('show');
-      modeIndicator.classList.add('gps-unavailable');
-      modeIndicator.childNodes[0].textContent = 'GPS Unavailable — Tap to Retry';
-    }
-
-    function hideGpsRetryBanner() {
-      gpsRetryBanner.classList.remove('show');
-      modeIndicator.classList.remove('gps-unavailable');
-      if (controlMode === 'gps') {
-        modeIndicator.childNodes[0].textContent = 'Mode: Live GPS';
-      }
-    }
-
-    gpsRetryBtn.addEventListener('click', () => {
-      hideGpsRetryBanner();
-      gpsRetryDismissed = false;
-      recalibrateGPS();
-    });
-
-    gpsRetryDismiss.addEventListener('click', () => {
-      gpsRetryDismissed = true;
-      gpsRetryBanner.classList.remove('show');
-    });
-
     function recalibrateGPS() {
       gpsInitialized = false;
       userContainer.style.display = 'none';
@@ -695,20 +597,11 @@
             applyGpsFix(position.coords.longitude, position.coords.latitude, position.coords.heading);
           },
           (error) => {
-            handleGpsError(error);
+            console.warn("GPS recalibration failed.", error);
           },
           { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
         startGPSWatch();
-      }
-    }
-
-    function handleGpsError(error) {
-      if (gpsRetryDismissed) return;
-      if (error.code === 1) { // PERMISSION_DENIED
-        showGpsRetryBanner('Location access denied — enable GPS in your browser settings');
-      } else if (error.code === 3) { // TIMEOUT
-        showGpsRetryBanner('GPS request timed out — try again');
       }
     }
 
@@ -720,7 +613,6 @@
         },
         (error) => {
           console.warn("Initial GPS position acquisition failed.", error);
-          handleGpsError(error);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -759,14 +651,10 @@
     modeIndicator.addEventListener('click', (e) => {
       const recalibrateIcon = modeIndicator.querySelector('.gps-recalibrate');
       if (recalibrateIcon && recalibrateIcon.contains(e.target)) {
-        gpsRetryDismissed = false;
-        hideGpsRetryBanner();
         recalibrateGPS();
         return;
       }
       if (modeIndicator.classList.contains('gps-unavailable')) {
-        gpsRetryDismissed = false;
-        hideGpsRetryBanner();
         recalibrateGPS();
         return;
       }
@@ -1209,7 +1097,6 @@
       } else {
         resetToOverview();
       }
-      updateInteriorSuggestion();
     }
 
     const compassBtn = document.querySelector('.maplibregl-ctrl-compass');
@@ -1751,8 +1638,11 @@
             }
           },
           (error) => {
+            if (!gpsSignalLost) {
+              gpsSignalLost = true;
+              userContainer.classList.add('gps-lost');
+            }
             console.warn("GPS watchPosition error or unavailable.", error);
-            handleGpsError(error);
           },
           { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
         );

@@ -1047,6 +1047,15 @@
       z-index: 1;
     }
 
+    .user-marker-container.gps-lost .user-dot {
+      opacity: 0.5;
+    }
+
+    .user-marker-container.gps-lost .user-pulse {
+      animation: none;
+      opacity: 0.2;
+    }
+
     @keyframes pulse {
       0% { transform: scale(0.6); opacity: 0.9; }
       100% { transform: scale(2); opacity: 0; }
@@ -1088,82 +1097,6 @@
     }
 
     /* --- INTERIOR VIEW SUGGESTION POPUP --- */
-    .interior-suggest {
-      position: absolute;
-      bottom: 150px;
-      left: 50%;
-      transform: translateX(-50%) translateY(10px);
-      z-index: 30;
-      background: rgba(255, 255, 255, 0.98);
-      color: #1e3a8a;
-      padding: 10px 16px;
-      border-radius: 16px;
-      font-size: 12px;
-      font-weight: 600;
-      box-shadow: 0 8px 24px rgba(30, 58, 138, 0.25);
-      border: 1.5px solid #e2e8f0;
-      border-left: 4px solid #2563eb;
-      display: none;
-      align-items: center;
-      gap: 10px;
-      white-space: nowrap;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.25s;
-    }
-
-    .interior-suggest.show {
-      display: flex;
-      opacity: 1;
-      visibility: visible;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    .interior-suggest strong {
-      color: #e11d48;
-    }
-
-    #interior-suggest-btn {
-      background: #2563eb;
-      border: none;
-      color: #ffffff;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 7px 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      letter-spacing: 0.3px;
-      box-shadow: 0 3px 10px rgba(37, 99, 235, 0.35);
-      transition: background 0.2s;
-    }
-
-    #interior-suggest-btn:hover {
-      background: #1e3a8a;
-    }
-
-    #interior-suggest-close {
-      background: #f1f5f9;
-      border: none;
-      color: #1e3a8a;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: background 0.2s, color 0.2s;
-    }
-
-    #interior-suggest-close:hover {
-      background: #e11d48;
-      color: #ffffff;
-    }
-
     /* --- INTERIOR ENTRY ICON --- */
     #interior-entry-icon {
       position: absolute;
@@ -1232,64 +1165,6 @@
       line-height: 1;
       cursor: pointer;
       flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* --- GPS RETRY / PERMISSION DENIED BANNER --- */
-    .gps-retry-banner {
-      position: absolute;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 31;
-      background: #b45309;
-      color: #ffffff;
-      padding: 9px 16px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 700;
-      box-shadow: 0 4px 16px rgba(180, 83, 9, 0.35);
-      border-bottom: 3px solid #78350f;
-      display: none;
-      align-items: center;
-      gap: 10px;
-      max-width: calc(100vw - 300px);
-      text-align: center;
-    }
-
-    .gps-retry-banner.show {
-      display: flex;
-    }
-
-    .gps-retry-banner button {
-      border: none;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-
-    #gps-retry-btn {
-      background: rgba(255, 255, 255, 0.25);
-      color: #ffffff;
-      padding: 4px 10px;
-    }
-
-    #gps-retry-btn:hover {
-      background: rgba(255, 255, 255, 0.4);
-    }
-
-    #gps-retry-dismiss {
-      background: rgba(255, 255, 255, 0.25);
-      color: #ffffff;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      font-size: 14px;
-      line-height: 1;
       display: flex;
       align-items: center;
       justify-content: center;
