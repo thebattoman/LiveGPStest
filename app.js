@@ -487,6 +487,12 @@
     const GPS_LERP_PER_FRAME = 0.08;    // interpolation factor per frame toward GPS target
     const ON_NETWORK_THRESHOLD = GPS_DEADBAND * 4; // from path -> hide helper line
 
+    // Static detection: freeze marker when user is stationary
+    const STATIC_FREEZE_SECONDS = 3;                    // freeze after this many seconds of no significant movement
+    const STATIC_UNFREEZE_THRESHOLD = GPS_DEADBAND * 3; // ~4.5m — must move this far to unfreeze
+    let gpsFrozen = false;
+    let lastSignificantMoveTime = performance.now();
+
     let targetCoords = [...START_COORDINATE];  // GPS-filtered destination
     let lastGpsFixTime = performance.now();     // timestamp of last GPS fix
 
@@ -557,6 +563,20 @@
       const dx = clampedLng - targetCoords[0];
       const dy = clampedLat - targetCoords[1];
       const dist = Math.hypot(dx, dy);
+
+      // Static detection: freeze marker when user is stationary
+      if (dist > STATIC_UNFREEZE_THRESHOLD) {
+        lastSignificantMoveTime = performance.now();
+        if (gpsFrozen) {
+          gpsFrozen = false;
+        }
+      } else if (dist <= GPS_DEADBAND) {
+        if (!gpsFrozen && (performance.now() - lastSignificantMoveTime) > STATIC_FREEZE_SECONDS * 1000) {
+          gpsFrozen = true;
+          targetCoords[0] = currentUserCoords[0];
+          targetCoords[1] = currentUserCoords[1];
+        }
+      }
 
       if (dist > GPS_DEADBAND) {
         let alpha;
@@ -1871,7 +1891,7 @@
       // --- GPS INTERPOLATION (runs every frame in GPS mode) ---
       // Lerps currentUserCoords toward the EMA-filtered targetCoords so the marker
       // and camera glide smoothly at 60 Hz between GPS fixes (1-5 Hz).
-      if (controlMode === 'gps' && gpsInitialized) {
+      if (controlMode === 'gps' && gpsInitialized && !gpsFrozen) {
         const dx = targetCoords[0] - currentUserCoords[0];
         const dy = targetCoords[1] - currentUserCoords[1];
         if (dx !== 0 || dy !== 0) {
